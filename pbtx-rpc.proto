@@ -23,6 +23,10 @@ message RegisterAccount {
     // PBTX-compatible signature of the above, signed by one of
     // permission keys.
     bytes signature = 2;
+
+    // optional field, up to 512 bytes, containing a certificate that can
+    // be verified by the registration service
+    bytes credentials = 3;
 }
 
 
@@ -36,6 +40,7 @@ message RegisterAccountResponse {
         SUCCESS = 0;
         INVALID_SIGNATURE = 1;
         DUPLICATE_ACTOR = 2;
+        INVALID_CREDENTIALS = 3;
     };
     
     StatusCode status = 2;
@@ -50,7 +55,7 @@ message RegisterAccountResponse {
 
 
 // the client sends a PBTX transaction to the RPC, and gets this
-// object always, alongside with the HTTP status code.
+// object as a response.
 
 message SendTransactionResponse {
     // sha256 hash of the pbtx.Transaction message that this response
