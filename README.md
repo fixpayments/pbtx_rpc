@@ -13,17 +13,27 @@ Configuration
 
 The following parameters are be configurable for an RPC installation:
 
-* `URL_PATH`, the path part of the RPC URL;
+* `URL_PATH`, the path part of the RPC URL.
 
-* `NETWORK_ID`, a 64-bit PBTX network identifier;
+* `NETWORK_ID`, a 64-bit PBTX network identifier.
 
-* `ANTELOPE_RPC`, an URL of the Antelope (ex-EOSIO) RPC endpoint;
+* `ANTELOPE_RPC`, an URL of the Antelope (ex-EOSIO) RPC endpoint.
 
 * `ANTELOPE_CONTRACT`, a 12-symbol name of an Antelope account where
-  PBTX contract is deployed;
+  PBTX contract is deployed.
+
+* `ANTELOPE_ADMIN`, a 12-symbol name of the Antelope account that is
+  creating PBTX accounts.
+
+* `ANTELOPE_ADMIN_PK`, private key for the admin account.
+
+* `ANTELOPE_WORKER`, a 12-symbol name of the Antelope account that is
+  pushing transactions to the blockchain.
+
+* `ANTELOPE_WORKER_PK`, private key for the worker account.
 
 * credentials verification procedure for RegisterAccount requests
-  (TBD);
+  (TBD).
 
 * backend configuration: location and credentials for the data stored
   by the RPC (TBD).
