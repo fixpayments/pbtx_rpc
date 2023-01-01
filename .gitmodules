@@ -1,0 +1,3 @@
+[submodule "pbtx"]
+	path = pbtx
+	url = https://github.com/fixpayments/pbtx.git
