@@ -1,13 +1,10 @@
-#!/usr/bin/env node
+import { Command } from 'commander';
+const program = new Command();
 
-'use strict';
-
-const program  = require('commander');
-const protobuf = require('protobufjs');
-
-const eosio = require('@greymass/eosio');
-
-const hash = require('hash.js');
+import protobuf from 'protobufjs';
+import hash from 'hash.js';
+import eosio from '@greymass/eosio';
+import fetch from 'node-fetch';
 
 
 program
@@ -19,7 +16,7 @@ program
     .requiredOption('--actorkey [value]', 'Actor private key')
     .option('--creds [value]', 'Credentials')
     .description('Register an account or retrieve seqnum and prev_hash')
-    .action((cmdopts) => {
+    .action(async (cmdopts) => {
         const options = program.opts();
         
         let rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
@@ -46,17 +43,31 @@ program
         }
         
         let perm_serialized = Permission.encode(permission_msg).finish();
-
+                    
         let RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
         let req = RegisterAccount.create({
-            permision_bytes: perm_serialized,
+            permissionBytes: perm_serialized,
             signature: eosio.Serializer.encode({object: privkey.signMessage(perm_serialized)}).array,
             credentials: creds
         });
         
-        let req_serialized = RegisterAccount.encodeDelimited(req).finish();
-            
-        console.log(req_serialized.toString('hex'));
+        let req_serialized = Buffer.from(RegisterAccount.encodeDelimited(req).finish());
+
+        const response = await fetch(options.url + '/register_account', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/octet-stream'},
+            body: req_serialized});
+        
+        if (!response.ok) {
+            throw new Error(`unexpected response ${response.statusText}`);
+        }
+        
+        let RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
+        let resp_decoded = RegisterAccountResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
+        
+        console.log(`response = ${JSON.stringify(resp_decoded)}`);
+        
+        
     });
 
 program.parse(process.argv);

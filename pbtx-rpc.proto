@@ -18,7 +18,7 @@ package pbtxrpc;
 message RegisterAccount {
     // pbtx.Permission message for a new or existing account, encoded
     // as bytes.
-    bytes permision_bytes = 1;
+    bytes permission_bytes = 1;
     
     // PBTX-compatible signature of the above, signed by one of
     // permission keys.
