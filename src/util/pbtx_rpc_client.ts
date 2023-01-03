@@ -18,13 +18,13 @@ program
     .action(async (cmdopts) => {
         const options = program.opts();
         
-        let rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
-        let pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
+        const rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
+        const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
 
-        let privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
+        const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
         
-        let Permission = pbtx_root.lookupType('pbtx.Permission');
-        let permission_msg = Permission.create({
+        const Permission = pbtx_root.lookupType('pbtx.Permission');
+        const permission_msg = Permission.create({
             actor: cmdopts.actor,
             threshold: 1,
             keys: [{
@@ -41,17 +41,17 @@ program
             creds = Buffer.from(cmdopts.creds, 'hex');
         }
         
-        let perm_serialized = Permission.encode(permission_msg).finish();
+        const perm_serialized = Permission.encode(permission_msg).finish();
                     
-        let RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
-        let req = RegisterAccount.create({
+        const RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
+        const req = RegisterAccount.create({
             permissionBytes: perm_serialized,
             signature: eosio.Serializer.encode({object: privkey.signMessage(perm_serialized)}).array,
             credentials: creds
         });
         
-        let req_serialized = Buffer.from(RegisterAccount.encodeDelimited(req).finish());
-        let req_hash = hash.sha256().update(req_serialized).digest();
+        const req_serialized = Buffer.from(RegisterAccount.encodeDelimited(req).finish());
+        const req_hash = hash.sha256().update(req_serialized).digest();
         
         const response = await fetch(options.url + '/register_account', {
             method: 'POST',
@@ -62,8 +62,8 @@ program
             throw new Error(`unexpected response ${response.statusText}`);
         }
         
-        let RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
-        let resp_decoded = RegisterAccountResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
+        const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
+        const resp_decoded = RegisterAccountResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
 
         if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
             throw new Error(`request_hash in response does not match the request. ` +
