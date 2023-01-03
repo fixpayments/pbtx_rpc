@@ -42,7 +42,16 @@ app.post(process.env.URL_PATH + '/register_account', (req, res) => {
     var RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
     var msg = RegisterAccount.decodeDelimited(req.body);
     console.log(JSON.stringify(msg));
-    res.send(Buffer.from(''));
+
+    let RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
+    let resp_msg = RegisterAccountResponse.create({
+        requestHash: req.sha256digest,
+        status: rpc_root.lookupEnum('pbtxrpc.RegisterAccountResponse.StatusCode').values.SUCCESS,
+        networkId: process.env.NETWORK_ID,
+        lastSeqnum: 555,
+        prevHash: 999
+    });
+    res.send(RegisterAccountResponse.encodeDelimited(resp_msg).finish());
 })
 
 

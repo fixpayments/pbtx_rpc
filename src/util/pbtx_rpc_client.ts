@@ -6,7 +6,6 @@ import hash from 'hash.js';
 import eosio from '@greymass/eosio';
 import fetch from 'node-fetch';
 
-
 program
     .requiredOption('--url [value]', 'PBTX-RPC URL');
 
@@ -52,7 +51,8 @@ program
         });
         
         let req_serialized = Buffer.from(RegisterAccount.encodeDelimited(req).finish());
-
+        let req_hash = hash.sha256().update(req_serialized).digest();
+        
         const response = await fetch(options.url + '/register_account', {
             method: 'POST',
             headers: {'Content-Type': 'application/octet-stream'},
@@ -64,10 +64,18 @@ program
         
         let RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
         let resp_decoded = RegisterAccountResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
-        
-        console.log(`response = ${JSON.stringify(resp_decoded)}`);
-        
-        
+
+        if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
+            throw new Error(`request_hash in response does not match the request. ` +
+                            `Expected: ${req_hash}, Got: ${resp_decoded['requestHash']}`);
+        }   
+
+        console.log(JSON.stringify({
+            status: resp_decoded['status'],
+            network_id: resp_decoded['networkId'].toString(),
+            last_seqnum: resp_decoded['lastSeqnum'],
+            prev_hash: resp_decoded['prevHash'].toString()
+        }));
     });
 
 program.parse(process.argv);
