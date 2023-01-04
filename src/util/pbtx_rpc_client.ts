@@ -59,7 +59,7 @@ program
             body: req_serialized});
         
         if (!response.ok) {
-            throw new Error(`unexpected response ${response.statusText}`);
+            throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
         }
         
         const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');

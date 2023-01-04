@@ -25,6 +25,7 @@ const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
 
 const RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
 const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
+const RegisterAccountResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.RegisterAccountResponse.StatusCode');
 const Permission = pbtx_root.lookupType('pbtx.Permission');
 
 
@@ -33,14 +34,16 @@ const adminPrivateKey = eosio.PrivateKey.fromString(process.env['ANTELOPE_ADMIN_
 const workerPrivateKey = eosio.PrivateKey.fromString(process.env['ANTELOPE_WORKER_PK'] as string);
 const chainAPI = new eosio.APIClient({provider: new eosio.FetchProvider(process.env['ANTELOPE_RPC_URL'] as string)});
 
-const info = await chainAPI.v1.chain.get_info();
-if( info.chain_id.hexString != process.env['ANTELOPE_CHAINID'] ) {
-    console.error(`Chain ID retrieved from ${process.env['ANTELOPE_RPC_URL']} differs from expected ${process.env['ANTELOPE_CHAINID']}`);
-    process.exit(1);
-}
-else {
-    console.info(`Antelope RPC URL: ${process.env['ANTELOPE_RPC_URL']}`);
-    console.info(`Chain ID: ${info.chain_id.hexString}`);
+{
+    const info = await chainAPI.v1.chain.get_info();
+    if( info.chain_id.hexString != process.env['ANTELOPE_CHAINID'] ) {
+        console.error(`Chain ID retrieved from ${process.env['ANTELOPE_RPC_URL']} differs from expected ${process.env['ANTELOPE_CHAINID']}`);
+        process.exit(1);
+    }
+    else {
+        console.info(`Antelope RPC URL: ${process.env['ANTELOPE_RPC_URL']}`);
+        console.info(`Chain ID: ${info.chain_id.hexString}`);
+    }
 }
 
 for (const acctype of ['ANTELOPE_CONTRACT', 'ANTELOPE_ADMIN', 'ANTELOPE_WORKER']) {
@@ -108,6 +111,10 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     const msg = RegisterAccount.decodeDelimited(req.body);
     console.log(logprefix + 'body: ' + JSON.stringify(msg));
 
+    let last_seqnum :number = 0;
+    let prev_hash :string = '0';
+    let status = RegisterAccountResponse_StatusCode.values.SUCCESS;
+
     const perm = Permission.decode(msg['permissionBytes']);
     console.log(logprefix + 'perm: ' +  JSON.stringify(perm));
 
@@ -126,32 +133,85 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
         }
     }
 
-    if( !verified ) {
-        throw new Error(logprefix + 'Cannot verify the signature in pbtxrpc.RegisterAccount message');
-    }
-    
     const actor = eosio.UInt64.from(perm['actor']);
-    console.log(logprefix + `Signature verified for actor: ${actor}`);
-    
-    const acc_res = await chainAPI.v1.chain.get_table_rows({
-        code: pbtx_contract,
-        table: 'actorperm',
-        scope: network_id,
-        key_type: 'i64',
-        limit: 1,
-        lower_bound: actor
-    });
 
+    if( !verified ) {
+        status = RegisterAccountResponse_StatusCode.values.INVALID_SIGNATURE;
+        console.error(logprefix + `Cannot verify the signature for actor: ${actor}`);
+    }
+    else {
+        console.log(logprefix + `Signature verified for actor: ${actor}`);
+        
+        const acc_res = await chainAPI.v1.chain.get_table_rows({
+            code: pbtx_contract,
+            table: 'actorperm',
+            scope: network_id,
+            key_type: 'i64',
+            limit: 1,
+            lower_bound: actor
+        });
 
-    
+        if( acc_res.rows.length == 1 && acc_res.rows[0].actor == actor ) {
+            if( ! Buffer.from(msg['permissionBytes']).equals(Buffer.from(acc_res.rows[0].permission, 'hex')) ) {
+                status = RegisterAccountResponse_StatusCode.values.DUPLICATE_ACTOR;
+                console.error(logprefix + `Actor ${actor} already exists with a different permission`);
+            }
+            else {
+                const seq_res = await chainAPI.v1.chain.get_table_rows({
+                    code: pbtx_contract,
+                    table: 'actorseq',
+                    scope: network_id,
+                    key_type: 'i64',
+                    limit: 1,
+                    lower_bound: actor
+                });
+
+                if( seq_res.rows.length != 1 || seq_res.rows[0].actor != actor ) {
+                    throw new Error(logprefix + `Corrupted data in actorseq table`);
+                }
+                
+                last_seqnum = seq_res.rows[0].seqnum;
+                prev_hash = String(seq_res.rows[0].prev_hash);                
+            }
+        }
+        else {
+            console.log(logprefix + `Actor ${actor} is new, registering it on blokchain`);
+
+            const info = await chainAPI.v1.chain.get_info();
+            const transaction = eosio.Transaction.from(
+                {
+                    ...info.getTransactionHeader(120),
+                    actions: [
+                        eosio.Action.from(
+                            {
+                                account: pbtx_contract,
+                                name: 'regactor',
+                                authorization: [{ actor: pbtx_admin, permission: 'active' }],
+                                data: {
+                                    network_id: process.env['NETWORK_ID'],
+                                    permission: msg['permissionBytes'],
+                                },
+                            },
+                            pbtx_abi.abi)
+                    ]
+                });
+
+            const signature = adminPrivateKey.signDigest(transaction.signingDigest(info.chain_id));
+            const signedTransaction = eosio.SignedTransaction.from({...transaction, signatures: [signature]});
+            const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
+            console.log(logprefix + `Sent transaction ${trx_result.transaction_id}`);
+        }
+    }
+
     const resp_msg = RegisterAccountResponse.create({
         requestHash: req.sha256digest,
-        status: rpc_root.lookupEnum('pbtxrpc.RegisterAccountResponse.StatusCode').values.SUCCESS,
+        status: status,
         networkId: process.env.NETWORK_ID,
-        lastSeqnum: 555,
-        prevHash: 999
+        lastSeqnum: last_seqnum,
+        prevHash: prev_hash
     });
     res.send(RegisterAccountResponse.encodeDelimited(resp_msg).finish());
+    console.log(logprefix + `Sent response with status: ${status}`);
 })
 
 
