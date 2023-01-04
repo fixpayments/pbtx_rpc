@@ -103,12 +103,36 @@ app.use(function (req, res, next) {
 
 
 app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
+    let logprefix = req.ip + ' ';
+    console.log(logprefix + 'request: register_account');
     const msg = RegisterAccount.decodeDelimited(req.body);
-    console.log(JSON.stringify(msg));
+    console.log(logprefix + 'body: ' + JSON.stringify(msg));
 
     const perm = Permission.decode(msg['permissionBytes']);
+    console.log(logprefix + 'perm: ' +  JSON.stringify(perm));
+
+    const sig = eosio.Serializer.decode({data: msg['signature'], type: eosio.Signature});
+
+    let verified = false;
+    for (let keyweight of perm['keys']) {
+        if( keyweight['key']['type'] != 0 ) {
+            throw new Error(logprefix + `Unexpected key type: ${keyweight['key']['type']}`);
+        }
+        let pubKey = eosio.Serializer.decode({data: keyweight['key']['keyBytes'], type: eosio.PublicKey});
+
+        if( sig.verifyMessage(msg['permissionBytes'], pubKey) ) {
+            verified = true;
+            break;
+        }
+    }
+
+    if( !verified ) {
+        throw new Error(logprefix + 'Cannot verify the signature in pbtxrpc.RegisterAccount message');
+    }
+    
     const actor = eosio.UInt64.from(perm['actor']);
-                                   
+    console.log(logprefix + `Signature verified for actor: ${actor}`);
+    
     const acc_res = await chainAPI.v1.chain.get_table_rows({
         code: pbtx_contract,
         table: 'actorperm',
