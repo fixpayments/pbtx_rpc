@@ -26,7 +26,13 @@ const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
 const RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
 const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
 const RegisterAccountResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.RegisterAccountResponse.StatusCode');
+
+const SendTransactionResponse = rpc_root.lookupType('pbtxrpc.SendTransactionResponse');
+const SendTransactionResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.SendTransactionResponse.StatusCode');
+
 const Permission = pbtx_root.lookupType('pbtx.Permission');
+const Transaction = pbtx_root.lookupType('pbtx.Transaction');
+const TransactionBody = pbtx_root.lookupType('pbtx.TransactionBody');
 
 
 // Blockchain interaction
@@ -80,11 +86,11 @@ console.info(`PBTX Network ID: ${network_id}`);
         console.error(`No such Network ID: ${network_id}`);
         process.exit(1);
     }
-    
+
     if( res.rows[0].admin_acc != pbtx_admin ) {
         console.error(`Network ID ${network_id} defines admin ${res.rows[0].admin_acc}, but ${pbtx_admin} is configured`);
         process.exit(1);
-    }        
+    }
 }
 
 
@@ -141,7 +147,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     }
     else {
         console.log(logprefix + `Signature verified for actor: ${actor}`);
-        
+
         const acc_res = await chainAPI.v1.chain.get_table_rows({
             code: pbtx_contract,
             table: 'actorperm',
@@ -169,9 +175,9 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
                 if( seq_res.rows.length != 1 || seq_res.rows[0].actor != actor ) {
                     throw new Error(logprefix + `Corrupted data in actorseq table`);
                 }
-                
+
                 last_seqnum = seq_res.rows[0].seqnum;
-                prev_hash = String(seq_res.rows[0].prev_hash);                
+                prev_hash = String(seq_res.rows[0].prev_hash);
             }
         }
         else {
@@ -188,7 +194,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
                                 name: 'regactor',
                                 authorization: [{ actor: pbtx_admin, permission: 'active' }],
                                 data: {
-                                    network_id: process.env['NETWORK_ID'],
+                                    network_id: network_id,
                                     permission: msg['permissionBytes'],
                                 },
                             },
@@ -206,14 +212,89 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     const resp_msg = RegisterAccountResponse.create({
         requestHash: req.sha256digest,
         status: status,
-        networkId: process.env.NETWORK_ID,
+        networkId: network_id,
         lastSeqnum: last_seqnum,
         prevHash: prev_hash
     });
     res.send(RegisterAccountResponse.encodeDelimited(resp_msg).finish());
     console.log(logprefix + `Sent response with status: ${status}`);
-})
+});
 
+
+app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
+    let logprefix = req.ip + ' ';
+    console.log(logprefix + 'request: send_transaction');
+    const trx = Transaction.decodeDelimited(req.body);
+    const trxbody = TransactionBody.decodeDelimited(trx['body']);
+    console.log(logprefix + 'trxbody: ' + JSON.stringify(trxbody));
+    const actor = trxbody['actor'];
+
+    let last_seqnum :number = 0;
+    let prev_hash :string = '0';
+    let status = SendTransactionResponse_StatusCode.values.SUCCESS;
+
+    if( trxbody['networkId'] != network_id ) {
+        status = SendTransactionResponse_StatusCode.values.INVALID_NETWORK_ID;
+        console.error(logprefix + `Wrong network ID: ${trxbody['networkId']}, expected: ${network_id}`);
+    }
+    else {
+        const seq_res = await chainAPI.v1.chain.get_table_rows({
+            code: pbtx_contract,
+            table: 'actorseq',
+            scope: network_id,
+            key_type: 'i64',
+            limit: 1,
+            lower_bound: actor
+        });
+
+        if( seq_res.rows.length != 1 || seq_res.rows[0].actor != actor ) {
+            status = SendTransactionResponse_StatusCode.values.INVALID_ACTOR;
+            console.error(logprefix + `Unknown actor: ${actor}`);
+        }
+        else if( trxbody['seqnum'] != seq_res.rows[0].seqnum + 1 || trxbody['prevHash'] != String(seq_res.rows[0].prev_hash) ) {
+            status = SendTransactionResponse_StatusCode.values.INVALID_SEQ;
+            console.error(logprefix + `INVALID_SEQ: seqnum=${trxbody['seqnum']} prev_hash=${trxbody['prevHash']}, ` +
+                          `expected: ${seq_res.rows[0].seqnum + 1}, ${seq_res.rows[0].prev_hash}`);
+            last_seqnum = seq_res.rows[0].seqnum;
+            prev_hash = String(seq_res.rows[0].prev_hash);
+        }
+        else {
+            const info = await chainAPI.v1.chain.get_info();
+            const transaction = eosio.Transaction.from(
+                {
+                    ...info.getTransactionHeader(120),
+                    actions: [
+                        eosio.Action.from(
+                            {
+                                account: pbtx_contract,
+                                name: 'exectrx',
+                                authorization: [{ actor: pbtx_worker, permission: 'active' }],
+                                data: {
+                                    worker: pbtx_worker,
+                                    trx_input: req.body
+                                },
+                            },
+                            pbtx_abi.abi)
+                    ]
+                });
+
+            const signature = workerPrivateKey.signDigest(transaction.signingDigest(info.chain_id));
+            const signedTransaction = eosio.SignedTransaction.from({...transaction, signatures: [signature]});
+            const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
+            console.log(logprefix + `Sent transaction ${trx_result.transaction_id}`);
+        }
+    }
+
+    const resp_msg = SendTransactionResponse.create({
+        requestHash: req.sha256digest,
+        status: status,
+        networkId: network_id,
+        lastSeqnum: last_seqnum,
+        prevHash: prev_hash
+    });
+    res.send(SendTransactionResponse.encodeDelimited(resp_msg).finish());
+    console.log(logprefix + `Sent response with status: ${status}`);
+});
 
 
 app.listen(process.env.PORT, process.env.BINDADDR, () => {
