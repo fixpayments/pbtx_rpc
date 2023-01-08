@@ -41,6 +41,7 @@ message RegisterAccountResponse {
         INVALID_SIGNATURE = 1;
         DUPLICATE_ACTOR = 2;
         INVALID_CREDENTIALS = 3;
+        INFRASTRUCTURE_ERROR = 4;
     };
     
     StatusCode status = 2;
@@ -52,6 +53,38 @@ message RegisterAccountResponse {
     uint32 last_seqnum = 4;
     fixed64 prev_hash = 5 [jstype = JS_STRING];
 }
+
+
+// The client may request the latest registered sequence number and
+// prev_hash in order to re-send a transaction or re-sync itself
+
+message GetSeq {
+    // actor account ID
+    fixed64 actor = 1 [jstype = JS_STRING];
+}
+
+
+message GetSeqResponse {
+    // sha256 hash of the GetSeq message (including the
+    // length prefix) that this response corresponds to
+    bytes request_hash = 1;
+
+    // indicates if the request was successful
+    enum StatusCode {
+        SUCCESS = 0;
+        INVALID_ACTOR = 1;
+    };
+    
+    StatusCode status = 2;
+    
+    // network ID for subsequent transactions
+    fixed64 network_id = 3 [jstype = JS_STRING];
+
+    // last transaction details, see pbtx.proto
+    uint32 last_seqnum = 4;
+    fixed64 prev_hash = 5 [jstype = JS_STRING];
+}
+
 
 
 // the client sends a PBTX transaction to the RPC, and gets this
@@ -74,9 +107,5 @@ message SendTransactionResponse {
     };
     
     StatusCode status = 2;
-    
-    // In case of INVALID_SEQ status, these fields show the last transaction details
-    uint32 last_seqnum = 4;
-    fixed64 prev_hash = 5 [jstype = JS_STRING];
 }
 

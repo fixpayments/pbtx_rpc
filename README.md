@@ -64,6 +64,12 @@ prepended with its length (PB_ENCODE_DELIMITED encoding in nanopb).
   account. It also returns the current `seqnum` and `prev_hash` from
   `actorseq` table in the contract.
 
+* `BASE_URL/get_seq` takes a `pbtxrpc.GetSeq` message and returns a
+  `pbtxrpc.GetSeq`. The backend retrieves the current `seqnum` and
+  `prev_hash` from for the account and returns them alongside the
+  network ID.
+
+
 * `BASE_URL/send_transaction` takes a `pbtx.Transaction` message and
   returns `pbtxrpc.SendTransactionResponse`. The backend tries sending
   the transaction to the blockchain. Additionally it stores the
