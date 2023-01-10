@@ -3,10 +3,17 @@ import express from 'express';
 import dotenv from 'dotenv-defaults';
 dotenv.config();
 
-import protobuf from 'protobufjs';
+import { TransactionBody, Transaction, Permission }
+from '../lib/generated/pbtx_pb.js';
+
+import { RegisterAccount, RegisterAccountResponse, RegisterAccountResponse_StatusCode,
+         GetSeq, GetSeqResponse, GetSeqResponse_StatusCode,
+         SendTransactionResponse, SendTransactionResponse_StatusCode }
+from '../lib/generated/pbtx-rpc_pb.js';
+
 import hash from 'hash.js';
 import eosio from '@greymass/eosio';
-
+import Long from "long";
 
 
 const required_options = ['PORT', 'BINDADDR', 'URL_PATH', 'NETWORK_ID', 'ANTELOPE_CHAINID', 'ANTELOPE_RPC_URL', 'ANTELOPE_CONTRACT',
@@ -20,24 +27,6 @@ for (const opt of required_options) {
     }
 }
 
-const rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
-const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
-
-const RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
-const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
-const RegisterAccountResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.RegisterAccountResponse.StatusCode');
-
-const GetSeq = rpc_root.lookupType('pbtxrpc.GetSeq');
-const GetSeqResponse = rpc_root.lookupType('pbtxrpc.GetSeqResponse');
-const GetSeqResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.GetSeqResponse.StatusCode');
-
-
-const SendTransactionResponse = rpc_root.lookupType('pbtxrpc.SendTransactionResponse');
-const SendTransactionResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.SendTransactionResponse.StatusCode');
-
-const Permission = pbtx_root.lookupType('pbtx.Permission');
-const Transaction = pbtx_root.lookupType('pbtx.Transaction');
-const TransactionBody = pbtx_root.lookupType('pbtx.TransactionBody');
 
 
 // Blockchain interaction
@@ -70,7 +59,7 @@ for (const acctype of ['ANTELOPE_CONTRACT', 'ANTELOPE_ADMIN', 'ANTELOPE_WORKER']
 const pbtx_contract: string = process.env['ANTELOPE_CONTRACT'] as string;
 const pbtx_admin: string = process.env['ANTELOPE_ADMIN'] as string;
 const pbtx_worker: string = process.env['ANTELOPE_WORKER'] as string;
-const network_id: string = process.env['NETWORK_ID'] as string;
+const network_id: BigInt = BigInt(process.env['NETWORK_ID'] as string);
 
 const pbtx_abi = await chainAPI.v1.chain.get_abi(pbtx_contract);
 
@@ -119,14 +108,14 @@ app.use(function (req, res, next) {
 app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     let logprefix = req.ip + ' ';
     console.log(logprefix + 'request: register_account');
-    const msg = RegisterAccount.decodeDelimited(req.body);
+    const msg = RegisterAccount.fromBinary(req.body);
     console.log(logprefix + 'body: ' + JSON.stringify(msg));
 
     let last_seqnum :number = 0;
-    let prev_hash :string = '0';
-    let status = RegisterAccountResponse_StatusCode.values.SUCCESS;
+    let prev_hash :BigInt = BigInt(0);
+    let status = RegisterAccountResponse_StatusCode.SUCCESS;
 
-    const perm = Permission.decode(msg['permissionBytes']);
+    const perm = Permission.fromBinary(msg['permissionBytes']);
     console.log(logprefix + 'perm: ' +  JSON.stringify(perm));
 
     const sig = eosio.Serializer.decode({data: msg['signature'], type: eosio.Signature});
@@ -144,7 +133,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
         }
     }
 
-    const actor = eosio.UInt64.from(perm['actor']);
+    const actor = perm['actor'];
 
     if( !verified ) {
         status = RegisterAccountResponse_StatusCode.values.INVALID_SIGNATURE;
@@ -156,7 +145,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
         const acc_res = await chainAPI.v1.chain.get_table_rows({
             code: pbtx_contract,
             table: 'actorperm',
-            scope: network_id,
+            scope: eosio.UInt64.from(network_id),
             key_type: 'i64',
             limit: 1,
             lower_bound: actor
@@ -164,14 +153,14 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
 
         if( acc_res.rows.length == 1 && acc_res.rows[0].actor == actor ) {
             if( ! Buffer.from(msg['permissionBytes']).equals(Buffer.from(acc_res.rows[0].permission, 'hex')) ) {
-                status = RegisterAccountResponse_StatusCode.values.DUPLICATE_ACTOR;
+                status = RegisterAccountResponse_StatusCode.DUPLICATE_ACTOR;
                 console.error(logprefix + `Actor ${actor} already exists with a different permission`);
             }
             else {
                 const seq_res = await chainAPI.v1.chain.get_table_rows({
                     code: pbtx_contract,
                     table: 'actorseq',
-                    scope: network_id,
+                    scope: eosio.UInt64.from(network_id),
                     key_type: 'i64',
                     limit: 1,
                     lower_bound: actor
@@ -182,7 +171,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
                 }
 
                 last_seqnum = seq_res.rows[0].seqnum;
-                prev_hash = String(seq_res.rows[0].prev_hash);
+                prev_hash = BigInt(seq_res.rows[0].prev_hash);
             }
         }
         else {
@@ -211,7 +200,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
             const signedTransaction = eosio.SignedTransaction.from({...transaction, signatures: [signature]});
             const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
             if( trx_result.processed['except'] ) {
-                status = RegisterAccountResponse_StatusCode.values.INFRASTRUCTURE_ERROR;
+                status = RegisterAccountResponse_StatusCode.INFRASTRUCTURE_ERROR;
                 console.error('Antelope transaction failed');
                 console.error(JSON.stringify(trx_result));
             }
@@ -221,14 +210,14 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
         }
     }
 
-    const resp_msg = RegisterAccountResponse.create({
+    const resp_msg = new RegisterAccountResponse({
         requestHash: req.sha256digest,
         status: status,
         networkId: network_id,
         lastSeqnum: last_seqnum,
         prevHash: prev_hash
     });
-    res.send(RegisterAccountResponse.encodeDelimited(resp_msg).finish());
+    res.send(resp_msg.toBinary());
     console.log(logprefix + `Sent response with status: ${status}`);
 });
 
@@ -236,18 +225,18 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
 app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
     let logprefix = req.ip + ' ';
     console.log(logprefix + 'request: get_seq');
-    const msg = GetSeq.decodeDelimited(req.body);
+    const msg = GetSeq.fromBinary(req.body);
     console.log(logprefix + 'body: ' + JSON.stringify(msg));
     const actor = msg['actor'];
 
     let last_seqnum :number = 0;
-    let prev_hash :string = '0';
-    let status = GetSeqResponse_StatusCode.values.SUCCESS;
+    let prev_hash :BigInt = BigInt(0);
+    let status = GetSeqResponse_StatusCode.SUCCESS;
 
     const seq_res = await chainAPI.v1.chain.get_table_rows({
         code: pbtx_contract,
         table: 'actorseq',
-        scope: network_id,
+        scope: eosio.UInt64.from(network_id),
         key_type: 'i64',
         limit: 1,
         lower_bound: actor
@@ -259,45 +248,41 @@ app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
     }
     else {
         last_seqnum = seq_res.rows[0].seqnum;
-        prev_hash = String(seq_res.rows[0].prev_hash);
+        prev_hash = BigInt(seq_res.rows[0].prev_hash);
     }
 
     const resp_msg = GetSeqResponse.create({
         requestHash: req.sha256digest,
         status: status,
-        networkId: String(network_id),
+        networkId: network_id,
         lastSeqnum: last_seqnum,
         prevHash: prev_hash
     });
-    res.send(GetSeqResponse.encodeDelimited(resp_msg).finish());
-    console.log(logprefix + 'Sent response: ' + JSON.stringify({
-        status: status,
-        networkId: String(network_id),
-        lastSeqnum: last_seqnum,
-        prevHash: prev_hash}));
+    res.send(resp_msg.toBinary());
+    console.log(logprefix + 'Sent response: ' + JSON.stringify(resp_msg));
 });
 
 
 app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
     let logprefix = req.ip + ' ';
     console.log(logprefix + 'request: send_transaction');
-    const trx = Transaction.decodeDelimited(req.body);
+    const trx = Transaction.fromBinary(req.body);
     console.log(logprefix + 'trx: ' + JSON.stringify(trx));
     const trxbody = TransactionBody.decode(trx['body']);
     console.log(logprefix + 'trxbody: ' + JSON.stringify(trxbody));
     const actor = trxbody['actor'];
 
-    let status = SendTransactionResponse_StatusCode.values.SUCCESS;
+    let status = SendTransactionResponse_StatusCode.SUCCESS;
 
-    if( trxbody['networkId'] != network_id ) {
-        status = SendTransactionResponse_StatusCode.values.INVALID_NETWORK_ID;
-        console.error(logprefix + `Wrong network ID: ${trxbody['networkId']}, expected: ${network_id}`);
+    if( trxbody['networkId'].toString() != network_id ) {
+        status = SendTransactionResponse_StatusCode.INVALID_NETWORK_ID;
+        console.error(logprefix + `Wrong network ID: ${trxbody['networkId'].toString()}, expected: ${network_id}`);
     }
     else {
         const seq_res = await chainAPI.v1.chain.get_table_rows({
             code: pbtx_contract,
             table: 'actorseq',
-            scope: network_id,
+            scope: eosio.UInt64.from(network_id),
             key_type: 'i64',
             limit: 1,
             lower_bound: actor
@@ -350,7 +335,7 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
         requestHash: req.sha256digest,
         status: status
     });
-    res.send(SendTransactionResponse.encodeDelimited(resp_msg).finish());
+    res.send(resp_msg.toBinary());
     console.log(logprefix + `Sent response with status: ${status}`);
 });
 

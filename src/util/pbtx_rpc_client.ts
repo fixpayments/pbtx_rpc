@@ -1,10 +1,19 @@
 import { Command } from 'commander';
 const program = new Command();
 
-import protobuf from 'protobufjs';
+import { TransactionBody, Transaction, Permission, KeyType }
+from '../../lib/generated/pbtx_pb.js';
+
+import { RegisterAccount, RegisterAccountResponse, RegisterAccountResponse_StatusCode,
+         GetSeq, GetSeqResponse, GetSeqResponse_StatusCode,
+         SendTransactionResponse, SendTransactionResponse_StatusCode }
+from '../../lib/generated/pbtx-rpc_pb.js';
+
 import hash from 'hash.js';
 import eosio from '@greymass/eosio';
 import fetch from 'node-fetch';
+import Long from "long";
+
 
 program
     .requiredOption('--url [value]', 'PBTX-RPC URL');
@@ -18,18 +27,13 @@ program
     .action(async (cmdopts) => {
         const options = program.opts();
 
-        const rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
-        const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
-
         const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
-
-        const Permission = pbtx_root.lookupType('pbtx.Permission');
-        const permission_msg = Permission.create({
+        const permission_msg = new Permission({
             actor: cmdopts.actor,
             threshold: 1,
             keys: [{
                 key: {
-                    type: pbtx_root.lookupEnum('pbtx.KeyType').values.EOSIO_KEY,
+                    type: KeyType['EOSIO_KEY'],
                     keyBytes: eosio.Serializer.encode({object: privkey.toPublic()}).array
                 },
                 weight: 1
@@ -41,16 +45,15 @@ program
             creds = Buffer.from(cmdopts.creds, 'hex');
         }
 
-        const perm_serialized = Permission.encode(permission_msg).finish();
+        const perm_serialized = permission_msg.toBinary();
 
-        const RegisterAccount = rpc_root.lookupType('pbtxrpc.RegisterAccount');
-        const req = RegisterAccount.create({
+        const req = new RegisterAccount({
             permissionBytes: perm_serialized,
             signature: eosio.Serializer.encode({object: privkey.signMessage(perm_serialized)}).array,
             credentials: creds
         });
 
-        const req_serialized = Buffer.from(RegisterAccount.encodeDelimited(req).finish());
+        const req_serialized = req.toBinary();
         const req_hash = hash.sha256().update(req_serialized).digest();
 
         const response = await fetch(options.url + '/register_account', {
@@ -62,8 +65,9 @@ program
             throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
         }
 
-        const RegisterAccountResponse = rpc_root.lookupType('pbtxrpc.RegisterAccountResponse');
-        const resp_decoded = RegisterAccountResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
+        const input = new Uint8Array(await response.arrayBuffer());
+        console.log(Buffer.from(input).toString('hex'));
+        const resp_decoded = RegisterAccountResponse.fromBinary(input);
 
         if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
             throw new Error(`request_hash in response does not match the request. ` +
@@ -92,29 +96,17 @@ program
         let transaction_type :number = cmdopts.type;
         let transaction_content = Buffer.from(cmdopts.content, 'hex');
 
-        const rpc_root = protobuf.loadSync('pbtx-rpc.proto').root;
-        const pbtx_root = protobuf.loadSync('pbtx/pbtx.proto').root;
-
         const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
 
-        const GetSeq = rpc_root.lookupType('pbtxrpc.GetSeq');
-        const GetSeqResponse = rpc_root.lookupType('pbtxrpc.GetSeqResponse');
-
-        const Transaction = pbtx_root.lookupType('pbtx.Transaction');
-        const TransactionBody = pbtx_root.lookupType('pbtx.TransactionBody');
-
-        const SendTransactionResponse = rpc_root.lookupType('pbtxrpc.SendTransactionResponse');
-        const SendTransactionResponse_StatusCode = rpc_root.lookupEnum('pbtxrpc.SendTransactionResponse.StatusCode');
-
         const actor = cmdopts.actor;
-        let network_id :string = '0';
-        let last_seqnum :number = 0;
-        let prev_hash :string = '0';
+        let network_id :BigInt;
+        let last_seqnum :number;
+        let prev_hash :BigInt;
 
         {
-            const getseq_msg = GetSeq.create({actor: actor});
+            const getseq_msg = new GetSeq({actor: actor});
 
-            const req_serialized = Buffer.from(GetSeq.encodeDelimited(getseq_msg).finish());
+            const req_serialized = getseq_msg.toBinary();
             const req_hash = hash.sha256().update(req_serialized).digest();
 
             const response = await fetch(options.url + '/get_seq', {
@@ -126,7 +118,9 @@ program
                 throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
             }
 
-            const resp_decoded = GetSeqResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
+            const resp_array = new Uint8Array(await response.arrayBuffer());
+            console.log(Buffer.from(resp_array).toString('hex'));
+            const resp_decoded = GetSeqResponse.fromBinary(resp_array);
 
             if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
                 throw new Error(`request_hash in response does not match the request. ` +
@@ -139,7 +133,7 @@ program
             prev_hash = resp_decoded['prevHash'];
         }
 
-        const trxbody = TransactionBody.create({
+        const trxbody = new TransactionBody({
             networkId: network_id,
             actor: actor,
             seqnum: last_seqnum + 1,
@@ -150,7 +144,7 @@ program
         const body_serialized = TransactionBody.encode(trxbody).finish();
         console.log(Buffer.from(body_serialized).toString('hex'));
         
-        const trx_msg = Transaction.create({
+        const trx_msg = new Transaction({
             body: body_serialized,
             authorities: [
                 {
@@ -174,7 +168,7 @@ program
             throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
         }
 
-        const resp_decoded = SendTransactionResponse.decodeDelimited(new Uint8Array(await response.arrayBuffer()));
+        const resp_decoded = SendTransactionResponse.fromBinary(new Uint8Array(await response.arrayBuffer()));
 
         if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
             throw new Error(`request_hash in response does not match the request. ` +

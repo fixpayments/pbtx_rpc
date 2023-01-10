@@ -51,8 +51,13 @@ status is different from SUCCESS.
 HTTP error status codes mean that the request cannot be processed at
 all.
 
-The content of the POST request and response is a Protobuf object
-prepended with its length (PB_ENCODE_DELIMITED encoding in nanopb).
+The content of the POST request and response is a Protobuf serialized
+message. It is up to the transport protocol to guarantee the
+completeness of the message (in HTTP POST, the message length is
+specified in Content-length header).
+
+Each response message contains a sha256 hash of the original
+serialized request message it responds to.
 
 `BASE_URL` is an URL consisting of the host part and configurable
 `URL_PATH`.

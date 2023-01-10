@@ -31,8 +31,8 @@ message RegisterAccount {
 
 
 message RegisterAccountResponse {
-    // sha256 hash of the RegisterAccount message (including the
-    // length prefix) that this response corresponds to
+    // sha256 hash of the RegisterAccount message
+    // that this response corresponds to.
     bytes request_hash = 1;
 
     // indicates if the request was successful
@@ -65,8 +65,8 @@ message GetSeq {
 
 
 message GetSeqResponse {
-    // sha256 hash of the GetSeq message (including the
-    // length prefix) that this response corresponds to
+    // sha256 hash of the GetSeq message
+    // that this response corresponds to.
     bytes request_hash = 1;
 
     // indicates if the request was successful
@@ -91,8 +91,8 @@ message GetSeqResponse {
 // object as a response.
 
 message SendTransactionResponse {
-    // sha256 hash of the pbtx.Transaction message (including the
-    // length prefix) that this response corresponds to
+    // sha256 hash of the pbtx.Transaction message
+    // that this response corresponds to.
     bytes request_hash = 1;
 
     // indicates if the request was successful
