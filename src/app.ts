@@ -211,13 +211,13 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     }
 
     const resp_msg = new RegisterAccountResponse({
-        requestHash: req.sha256digest,
+        requestHash: Buffer.from(req.sha256digest),
         status: status,
         networkId: network_id,
         lastSeqnum: last_seqnum,
         prevHash: prev_hash
     });
-    res.send(resp_msg.toBinary());
+    res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + `Sent response with status: ${status}`);
 });
 
@@ -251,14 +251,14 @@ app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
         prev_hash = BigInt(seq_res.rows[0].prev_hash);
     }
 
-    const resp_msg = GetSeqResponse.create({
-        requestHash: req.sha256digest,
+    const resp_msg = new GetSeqResponse({
+        requestHash: Buffer.from(req.sha256digest),
         status: status,
         networkId: network_id,
         lastSeqnum: last_seqnum,
         prevHash: prev_hash
     });
-    res.send(resp_msg.toBinary());
+    res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + 'Sent response: ' + JSON.stringify(resp_msg));
 });
 
@@ -268,7 +268,7 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
     console.log(logprefix + 'request: send_transaction');
     const trx = Transaction.fromBinary(req.body);
     console.log(logprefix + 'trx: ' + JSON.stringify(trx));
-    const trxbody = TransactionBody.decode(trx['body']);
+    const trxbody = TransactionBody.fromBinary(trx['body']);
     console.log(logprefix + 'trxbody: ' + JSON.stringify(trxbody));
     const actor = trxbody['actor'];
 
@@ -310,7 +310,7 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
                                 authorization: [{ actor: pbtx_worker, permission: 'active' }],
                                 data: {
                                     worker: pbtx_worker,
-                                    trx_input: Transaction.encode(trx).finish()
+                                    trx_input: req.body
                                 },
                             },
                             pbtx_abi.abi)
@@ -331,11 +331,11 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
         }
     }
 
-    const resp_msg = SendTransactionResponse.create({
-        requestHash: req.sha256digest,
+    const resp_msg = new SendTransactionResponse({
+        requestHash: Buffer.from(req.sha256digest),
         status: status
     });
-    res.send(resp_msg.toBinary());
+    res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + `Sent response with status: ${status}`);
 });
 

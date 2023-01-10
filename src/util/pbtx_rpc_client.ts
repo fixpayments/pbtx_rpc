@@ -93,12 +93,12 @@ program
     .action(async (cmdopts) => {
         const options = program.opts();
 
-        let transaction_type :number = cmdopts.type;
+        let transaction_type = Number(cmdopts.type);
         let transaction_content = Buffer.from(cmdopts.content, 'hex');
 
         const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
 
-        const actor = cmdopts.actor;
+        const actor = Number(cmdopts.actor);
         let network_id :BigInt;
         let last_seqnum :number;
         let prev_hash :BigInt;
@@ -128,9 +128,9 @@ program
             }
 
             console.log('get_seq response: ' + JSON.stringify(resp_decoded));
-            network_id = resp_decoded['networkId'];
-            last_seqnum = resp_decoded['lastSeqnum'];
-            prev_hash = resp_decoded['prevHash'];
+            network_id = BigInt(resp_decoded['networkId']);
+            last_seqnum = resp_decoded['lastSeqnum'] as number;
+            prev_hash = BigInt(resp_decoded['prevHash']);
         }
 
         const trxbody = new TransactionBody({
@@ -141,7 +141,7 @@ program
             transactionType: transaction_type,
             transactionContent: transaction_content});
 
-        const body_serialized = TransactionBody.encode(trxbody).finish();
+        const body_serialized = trxbody.toBinary();
         console.log(Buffer.from(body_serialized).toString('hex'));
         
         const trx_msg = new Transaction({
@@ -154,7 +154,7 @@ program
             ]
         });
 
-        const req_serialized = Buffer.from(Transaction.encodeDelimited(trx_msg).finish());
+        const req_serialized = Buffer.from(trx_msg.toBinary());
         console.log(Buffer.from(req_serialized).toString('hex'));
 
         const req_hash = hash.sha256().update(req_serialized).digest();
