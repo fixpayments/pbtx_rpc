@@ -3,7 +3,7 @@
   "type": "module",
   "version": "1.0.0",
   "description": "",
-  "main": "lib/app.js",
+  "main": "lib/rpc-server.ts",
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -14,7 +14,7 @@
   "scripts": {
     "generate": "protoc --plugin ./node_modules/.bin/protoc-gen-es -I . -I pbtx/  --es_out src/generated/ --es_opt target=ts pbtx-rpc.proto pbtx.proto",
     "build": "tsc",
-    "start": "node lib/app.js dotenv_config_path=./.env"
+    "start": "node lib/rpc-server.js dotenv_config_path=./.env"
   },
   "files": [
     "lib/*",

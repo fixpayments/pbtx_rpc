@@ -6,9 +6,9 @@ dotenv.config();
 import { TransactionBody, Transaction, Permission }
 from '../lib/generated/pbtx_pb.js';
 
-import { RegisterAccount, RegisterAccountResponse, RegisterAccountResponse_StatusCode,
-         GetSeq, GetSeqResponse, GetSeqResponse_StatusCode,
-         SendTransactionResponse, SendTransactionResponse_StatusCode }
+import {
+    RequestResponse, RequestResponse_StatusCode, AccountSeqData,
+    RegisterAccount, GetSeq }
 from '../lib/generated/pbtx-rpc_pb.js';
 
 import hash from 'hash.js';
@@ -37,7 +37,8 @@ const chainAPI = new eosio.APIClient({provider: new eosio.FetchProvider(process.
 {
     const info = await chainAPI.v1.chain.get_info();
     if( info.chain_id.hexString != process.env['ANTELOPE_CHAINID'] ) {
-        console.error(`Chain ID retrieved from ${process.env['ANTELOPE_RPC_URL']} differs from expected ${process.env['ANTELOPE_CHAINID']}`);
+        console.error(`Chain ID retrieved from ${process.env['ANTELOPE_RPC_URL']} differs ` +
+                      `from expected ${process.env['ANTELOPE_CHAINID']}`);
         process.exit(1);
     }
     else {
@@ -100,7 +101,7 @@ app.use(function (req, res, next) {
 app.use(express.raw());
 
 app.use(function (req, res, next) {
-    req.sha256digest = hash.sha256().update(req.body).digest();
+    req.sha256digest = Buffer.from(hash.sha256().update(req.body).digest());
     next();
 });
 
@@ -113,7 +114,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
 
     let last_seqnum :number = 0;
     let prev_hash :BigInt = BigInt(0);
-    let status = RegisterAccountResponse_StatusCode.SUCCESS;
+    let status = RequestResponse_StatusCode.SUCCESS;
 
     const perm = Permission.fromBinary(msg['permissionBytes']);
     console.log(logprefix + 'perm: ' +  JSON.stringify(perm));
@@ -136,7 +137,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
     const actor = perm['actor'];
 
     if( !verified ) {
-        status = RegisterAccountResponse_StatusCode.values.INVALID_SIGNATURE;
+        status = RequestResponse_StatusCode.values.INVALID_SIGNATURE;
         console.error(logprefix + `Cannot verify the signature for actor: ${actor}`);
     }
     else {
@@ -153,7 +154,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
 
         if( acc_res.rows.length == 1 && acc_res.rows[0].actor == actor ) {
             if( ! Buffer.from(msg['permissionBytes']).equals(Buffer.from(acc_res.rows[0].permission, 'hex')) ) {
-                status = RegisterAccountResponse_StatusCode.DUPLICATE_ACTOR;
+                status = RequestResponse_StatusCode.DUPLICATE_ACTOR;
                 console.error(logprefix + `Actor ${actor} already exists with a different permission`);
             }
             else {
@@ -200,7 +201,7 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
             const signedTransaction = eosio.SignedTransaction.from({...transaction, signatures: [signature]});
             const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
             if( trx_result.processed['except'] ) {
-                status = RegisterAccountResponse_StatusCode.INFRASTRUCTURE_ERROR;
+                status = RequestResponse_StatusCode.INFRASTRUCTURE_ERROR;
                 console.error('Antelope transaction failed');
                 console.error(JSON.stringify(trx_result));
             }
@@ -210,13 +211,16 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
         }
     }
 
-    const resp_msg = new RegisterAccountResponse({
-        requestHash: Buffer.from(req.sha256digest),
-        status: status,
+    const seq_data = new AccountSeqData({
         networkId: network_id,
         lastSeqnum: last_seqnum,
-        prevHash: prev_hash
-    });
+        prevHash: prev_hash});
+
+    const resp_msg = new RequestResponse({
+        requestHash: req.sha256digest,
+        status: status,
+        data: seq_data.toBinary()});
+
     res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + `Sent response with status: ${status}`);
 });
@@ -231,7 +235,7 @@ app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
 
     let last_seqnum :number = 0;
     let prev_hash :BigInt = BigInt(0);
-    let status = GetSeqResponse_StatusCode.SUCCESS;
+    let status = RequestResponse_StatusCode.SUCCESS;
 
     const seq_res = await chainAPI.v1.chain.get_table_rows({
         code: pbtx_contract,
@@ -243,7 +247,7 @@ app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
     });
 
     if( seq_res.rows.length != 1 || seq_res.rows[0].actor != actor ) {
-        status = GetSeqResponse_StatusCode.values.INVALID_ACTOR;
+        status = RequestResponse_StatusCode.values.INVALID_ACTOR;
         console.error(logprefix + `Unknown actor: ${actor}`);
     }
     else {
@@ -251,13 +255,16 @@ app.post(process.env.URL_PATH + '/get_seq', async (req, res) => {
         prev_hash = BigInt(seq_res.rows[0].prev_hash);
     }
 
-    const resp_msg = new GetSeqResponse({
-        requestHash: Buffer.from(req.sha256digest),
-        status: status,
+    const seq_data = new AccountSeqData({
         networkId: network_id,
         lastSeqnum: last_seqnum,
-        prevHash: prev_hash
-    });
+        prevHash: prev_hash});
+
+    const resp_msg = new RequestResponse({
+        requestHash: req.sha256digest,
+        status: status,
+        data: seq_data.toBinary()});
+
     res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + 'Sent response: ' + JSON.stringify(resp_msg));
 });
@@ -272,10 +279,10 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
     console.log(logprefix + 'trxbody: ' + JSON.stringify(trxbody));
     const actor = trxbody['actor'];
 
-    let status = SendTransactionResponse_StatusCode.SUCCESS;
+    let status = RequestResponse_StatusCode.SUCCESS;
 
     if( trxbody['networkId'].toString() != network_id ) {
-        status = SendTransactionResponse_StatusCode.INVALID_NETWORK_ID;
+        status = RequestResponse_StatusCode.INVALID_NETWORK_ID;
         console.error(logprefix + `Wrong network ID: ${trxbody['networkId'].toString()}, expected: ${network_id}`);
     }
     else {
@@ -289,11 +296,11 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
         });
 
         if( seq_res.rows.length != 1 || seq_res.rows[0].actor != actor ) {
-            status = SendTransactionResponse_StatusCode.values.INVALID_ACTOR;
+            status = RequestResponse_StatusCode.values.INVALID_ACTOR;
             console.error(logprefix + `Unknown actor: ${actor}`);
         }
         else if( trxbody['seqnum'] != seq_res.rows[0].seqnum + 1 || trxbody['prevHash'] != String(seq_res.rows[0].prev_hash) ) {
-            status = SendTransactionResponse_StatusCode.values.INVALID_SEQ;
+            status = RequestResponse_StatusCode.values.INVALID_SEQ;
             console.error(logprefix + `INVALID_SEQ: seqnum=${trxbody['seqnum']} prev_hash=${trxbody['prevHash']}, ` +
                           `expected: ${seq_res.rows[0].seqnum + 1}, ${seq_res.rows[0].prev_hash}`);
         }
@@ -321,7 +328,7 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
             const signedTransaction = eosio.SignedTransaction.from({...transaction, signatures: [signature]});
             const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
             if( trx_result.processed['except'] ) {
-                status = SendTransactionResponse_StatusCode.values.INVALID_CONTENT;
+                status = RequestResponse_StatusCode.values.INVALID_CONTENT;
                 console.error('Antelope transaction failed');
                 console.error(JSON.stringify(trx_result));
             }
@@ -331,10 +338,10 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
         }
     }
 
-    const resp_msg = new SendTransactionResponse({
-        requestHash: Buffer.from(req.sha256digest),
-        status: status
-    });
+    const resp_msg = new RequestResponse({
+        requestHash: req.sha256digest,
+        status: status});
+
     res.send(Buffer.from(resp_msg.toBinary()));
     console.log(logprefix + `Sent response with status: ${status}`);
 });

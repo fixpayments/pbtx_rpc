@@ -4,9 +4,9 @@ const program = new Command();
 import { TransactionBody, Transaction, Permission, KeyType }
 from '../../lib/generated/pbtx_pb.js';
 
-import { RegisterAccount, RegisterAccountResponse, RegisterAccountResponse_StatusCode,
-         GetSeq, GetSeqResponse, GetSeqResponse_StatusCode,
-         SendTransactionResponse, SendTransactionResponse_StatusCode }
+import {
+    RequestResponse, RequestResponse_StatusCode, AccountSeqData,
+    RegisterAccount, GetSeq }
 from '../../lib/generated/pbtx-rpc_pb.js';
 
 import hash from 'hash.js';
@@ -14,6 +14,7 @@ import eosio from '@greymass/eosio';
 import fetch from 'node-fetch';
 import Long from "long";
 
+const options = program.opts();
 
 program
     .requiredOption('--url [value]', 'PBTX-RPC URL');
@@ -25,7 +26,6 @@ program
     .option('--creds [value]', 'Credentials')
     .description('Register an account or retrieve seqnum and prev_hash')
     .action(async (cmdopts) => {
-        const options = program.opts();
 
         const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
         const permission_msg = new Permission({
@@ -47,38 +47,20 @@ program
 
         const perm_serialized = permission_msg.toBinary();
 
-        const req = new RegisterAccount({
+        const req_serialized = new RegisterAccount({
             permissionBytes: perm_serialized,
             signature: eosio.Serializer.encode({object: privkey.signMessage(perm_serialized)}).array,
             credentials: creds
-        });
+        }).toBinary();
 
-        const req_serialized = req.toBinary();
-        const req_hash = hash.sha256().update(req_serialized).digest();
-
-        const response = await fetch(options.url + '/register_account', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/octet-stream'},
-            body: req_serialized});
-
-        if (!response.ok) {
-            throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
-        }
-
-        const input = new Uint8Array(await response.arrayBuffer());
-        console.log(Buffer.from(input).toString('hex'));
-        const resp_decoded = RegisterAccountResponse.fromBinary(input);
-
-        if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
-            throw new Error(`request_hash in response does not match the request. ` +
-                            `Expected: ${req_hash}, Got: ${resp_decoded['requestHash']}`);
-        }
+        const resp :RequestResponse = await call_rpc(req_serialized, '/register_account');
+        const getseq_data :AccountSeqData = AccountSeqData.fromBinary(resp.data);
 
         console.log(JSON.stringify({
-            status: resp_decoded['status'],
-            network_id: resp_decoded['networkId'].toString(),
-            last_seqnum: resp_decoded['lastSeqnum'],
-            prev_hash: resp_decoded['prevHash'].toString()
+            status: resp['status'],
+            network_id: getseq_data['networkId'].toString(),
+            last_seqnum: getseq_data['lastSeqnum'],
+            prev_hash: getseq_data['prevHash'].toString()
         }));
     });
 
@@ -91,7 +73,6 @@ program
     .requiredOption('--content [value]', 'Transaction content')
     .description('Send a PBTX transaction')
     .action(async (cmdopts) => {
-        const options = program.opts();
 
         let transaction_type = Number(cmdopts.type);
         let transaction_content = Buffer.from(cmdopts.content, 'hex');
@@ -99,39 +80,15 @@ program
         const privkey = eosio.PrivateKey.fromString(cmdopts.actorkey);
 
         const actor = Number(cmdopts.actor);
-        let network_id :BigInt;
-        let last_seqnum :number;
-        let prev_hash :BigInt;
 
-        {
-            const getseq_msg = new GetSeq({actor: actor});
+        const getseq_serialized  = new GetSeq({actor: actor}).toBinary();
+        const getseq_resp :RequestResponse = await call_rpc(getseq_serialized, '/get_seq');
+        const getseq_data :AccountSeqData = AccountSeqData.fromBinary(getseq_resp.data);
 
-            const req_serialized = getseq_msg.toBinary();
-            const req_hash = hash.sha256().update(req_serialized).digest();
-
-            const response = await fetch(options.url + '/get_seq', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/octet-stream'},
-                body: req_serialized});
-
-            if (!response.ok) {
-                throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
-            }
-
-            const resp_array = new Uint8Array(await response.arrayBuffer());
-            console.log(Buffer.from(resp_array).toString('hex'));
-            const resp_decoded = GetSeqResponse.fromBinary(resp_array);
-
-            if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
-                throw new Error(`request_hash in response does not match the request. ` +
-                                `Expected: ${req_hash}, Got: ${resp_decoded['requestHash']}`);
-            }
-
-            console.log('get_seq response: ' + JSON.stringify(resp_decoded));
-            network_id = BigInt(resp_decoded['networkId']);
-            last_seqnum = resp_decoded['lastSeqnum'] as number;
-            prev_hash = BigInt(resp_decoded['prevHash']);
-        }
+        console.log('get_seq response data: ' + JSON.stringify(getseq_data));
+        let network_id = BigInt(getseq_data['networkId']);
+        let last_seqnum = getseq_data['lastSeqnum'] as number;
+        let prev_hash = BigInt(getseq_data['prevHash']);
 
         const trxbody = new TransactionBody({
             networkId: network_id,
@@ -143,8 +100,8 @@ program
 
         const body_serialized = trxbody.toBinary();
         console.log(Buffer.from(body_serialized).toString('hex'));
-        
-        const trx_msg = new Transaction({
+
+        const trx_msg_serialized = new Transaction({
             body: body_serialized,
             authorities: [
                 {
@@ -152,37 +109,43 @@ program
                     sigs: [ eosio.Serializer.encode({object: privkey.signMessage(body_serialized)}).array ]
                 }
             ]
-        });
+        }).toBinary();
 
-        const req_serialized = Buffer.from(trx_msg.toBinary());
-        console.log(Buffer.from(req_serialized).toString('hex'));
-
-        const req_hash = hash.sha256().update(req_serialized).digest();
-
-        const response = await fetch(options.url + '/send_transaction', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/octet-stream'},
-            body: req_serialized});
-
-        if (!response.ok) {
-            throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
-        }
-
-        const resp_decoded = SendTransactionResponse.fromBinary(new Uint8Array(await response.arrayBuffer()));
-
-        if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
-            throw new Error(`request_hash in response does not match the request. ` +
-                            `Expected: ${req_hash}, Got: ${resp_decoded['requestHash']}`);
-        }
+        const trx_resp :RequestResponse = await call_rpc(trx_msg_serialized, '/send_transaction');
 
         console.log(JSON.stringify({
-            status: resp_decoded['status']
+            status: trx_resp['status']
         }));
     });
 
 
 
 program.parse(process.argv);
+
+
+async function call_rpc(req_serialized: Buffer, url: string): RequestResponse
+{
+    const req_hash = hash.sha256().update(req_serialized).digest();
+
+    const response = await fetch(options.url + url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/octet-stream'},
+        body: req_serialized});
+
+    if (!response.ok) {
+        throw new Error(`HTTP Error Response: ${response.status} ${response.statusText} ${await response.text()}`);
+    }
+
+    const resp_decoded = RequestResponse.fromBinary(new Uint8Array(await response.arrayBuffer()));
+
+    if( ! Buffer.from(req_hash).equals(resp_decoded['requestHash']) ) {
+        throw new Error(`request_hash in response does not match the request. ` +
+                        `Expected: ${req_hash}, Got: ${resp_decoded['requestHash']}`);
+    }
+
+    return resp_decoded;
+}
+
 
 
 /*
