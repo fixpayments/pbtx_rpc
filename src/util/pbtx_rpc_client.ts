@@ -84,7 +84,6 @@ program
         const getseq_resp :RequestResponse = await call_rpc(getseq_serialized, '/get_seq');
         const getseq_data :AccountSeqData = AccountSeqData.fromBinary(getseq_resp.data);
 
-        console.log('get_seq response data: ' + JSON.stringify(getseq_data));
         let network_id = BigInt(getseq_data['networkId']);
         let last_seqnum = getseq_data['lastSeqnum'] as number;
         let prev_hash = BigInt(getseq_data['prevHash']);
@@ -98,7 +97,6 @@ program
             transactionContent: transaction_content});
 
         const body_serialized = trxbody.toBinary();
-        console.log(Buffer.from(body_serialized).toString('hex'));
 
         const trx_msg_serialized = new Transaction({
             body: body_serialized,

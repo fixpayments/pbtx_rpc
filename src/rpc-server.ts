@@ -201,8 +201,8 @@ app.post(process.env.URL_PATH + '/register_account', async (req, res) => {
             const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
             if( trx_result.processed['except'] ) {
                 status = RequestResponse_StatusCode.INFRASTRUCTURE_ERROR;
-                console.error('Antelope transaction failed');
-                console.error(JSON.stringify(trx_result));
+                console.error(logprefix + 'Antelope transaction failed');
+                console.error(logprefix + JSON.stringify(trx_result));
             }
             else {
                 console.log(logprefix + `Sent transaction ${trx_result.transaction_id}`);
@@ -328,8 +328,8 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
             const trx_result = await chainAPI.v1.chain.send_transaction2(signedTransaction);
             if( trx_result.processed['except'] ) {
                 status = RequestResponse_StatusCode.values.INVALID_CONTENT;
-                console.error('Antelope transaction failed');
-                console.error(JSON.stringify(trx_result));
+                console.error(logprefix + 'Antelope transaction failed');
+                console.error(logprefix + JSON.stringify(trx_result));
             }
             else {
                 console.log(logprefix + `Sent transaction ${trx_result.transaction_id}`);
@@ -349,3 +349,11 @@ app.post(process.env.URL_PATH + '/send_transaction', async (req, res) => {
 app.listen(process.env.PORT, process.env.BINDADDR, () => {
     console.log(`Server is running at http://${process.env.BINDADDR}:${process.env.PORT}`);
 });
+
+
+/*
+ Local Variables:
+ mode: javascript
+ indent-tabs-mode: nil
+ End:
+*/
