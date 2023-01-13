@@ -12,7 +12,6 @@ from '../../lib/generated/pbtx-rpc_pb.js';
 import hash from 'hash.js';
 import eosio from '@greymass/eosio';
 import fetch from 'node-fetch';
-import Long from "long";
 
 const options = program.opts();
 

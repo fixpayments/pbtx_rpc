@@ -13,7 +13,6 @@ from '../lib/generated/pbtx-rpc_pb.js';
 
 import hash from 'hash.js';
 import eosio from '@greymass/eosio';
-import Long from "long";
 
 
 const required_options = ['PORT', 'BINDADDR', 'URL_PATH', 'NETWORK_ID', 'ANTELOPE_CHAINID', 'ANTELOPE_RPC_URL', 'ANTELOPE_CONTRACT',
